@@ -1,0 +1,21 @@
+# Prerequisites
+build/
+bin/
+lib/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.vs/
+*.swp
+*.swo
+
+# C++ specific
+*.o
+*.obj
+*.exe
+*.out
+*.dylib
