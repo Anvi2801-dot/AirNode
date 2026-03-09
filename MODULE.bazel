@@ -1,0 +1,13 @@
+module(
+    name = "gcvm_project",
+    version = "1.0",
+)
+
+# 1. Bring in MediaPipe
+bazel_dep(name = "mediapipe", version = "0.10.14")
+
+# 2. Bring in TensorFlow (MediaPipe's backbone)
+bazel_dep(name = "tensorflow", version = "2.13.0")
+
+# 3. Bring in Skylib
+bazel_dep(name = "bazel_skylib", version = "1.5.0")

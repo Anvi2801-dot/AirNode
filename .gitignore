@@ -19,3 +19,11 @@ Thumbs.db
 *.exe
 *.out
 *.dylib
+*.so
+
+# MediaPipe model files (download separately)
+*.task
+
+# Bazel
+.bazelrc.user
+bazel-*

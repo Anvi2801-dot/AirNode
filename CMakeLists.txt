@@ -1,30 +1,31 @@
-cmake_minimum_required(VERSION 3.10)
-project(GestureVirtualMouse)
-
+cmake_minimum_required(VERSION 3.16)
+project(GCVM)
 set(CMAKE_CXX_STANDARD 17)
 
-# 1. Look for OpenCV (Mac and Windows compatible)
 find_package(OpenCV REQUIRED)
-include_directories(${OpenCV_INCLUDE_DIRS})
 
-# 2. Define the OOPS source structure
-set(SOURCES 
-    src/main.cpp 
-    src/HandTracker.cpp
+set(MEDIAPIPE_DIR "$ENV{HOME}/.pyenv/versions/3.10.12/lib/python3.10/site-packages/mediapipe/tasks/c")
+set(MEDIAPIPE_DYLIB "${MEDIAPIPE_DIR}/libmediapipe.dylib")
+
+include_directories(
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/include
 )
 
-# 3. Add OS-specific "Action" modules
-if(APPLE)
-    list(APPEND SOURCES src/MacMouse.cpp)
-    find_library(CORE_GRAPHICS ApplicationServices)
-elseif(WIN32)
-    list(APPEND SOURCES src/WindowsMouse.cpp)
-endif()
+add_executable(gcvm_app
+    src/main.cpp
+    src/HandTracker.cpp
+    src/MacMouse.cpp
+)
 
-add_executable(GCVM ${SOURCES})
+target_link_libraries(gcvm_app
+    ${OpenCV_LIBS}
+    ${MEDIAPIPE_DYLIB}
+    "-framework ApplicationServices"
+)
 
-# 4. Link everything
-target_link_libraries(GCVM ${OpenCV_LIBS})
-if(APPLE)
-    target_link_libraries(GCVM ${CORE_GRAPHICS})
-endif()
+# Tell the binary where to find the dylib at runtime
+set_target_properties(gcvm_app PROPERTIES
+    BUILD_RPATH "${MEDIAPIPE_DIR}"
+    INSTALL_RPATH "${MEDIAPIPE_DIR}"
+)

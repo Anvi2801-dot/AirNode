@@ -1,0 +1,51 @@
+workspace(name = "gcvm_project")
+
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# 1. FAKE REPOS - Neutralizing GPU/Remote checks for Mac
+new_local_repository(name = "local_config_cuda", path = ".", build_file_content = "exports_files(['cuda/build_defs.bzl'])")
+new_local_repository(name = "local_config_rocm", path = ".", build_file_content = "exports_files(['rocm/build_defs.bzl'])")
+new_local_repository(name = "local_config_tensorrt", path = ".", build_file_content = "exports_files(['build_defs.bzl'])")
+new_local_repository(name = "local_config_remote_execution", path = ".", build_file_content = "exports_files(['remote_execution.bzl'])")
+
+# 2. CORE DEPENDENCIES
+http_archive(
+    name = "bazel_skylib",
+    sha256 = "cd55a062e763b9349921f0f5db8c3933288dc8ba4f76dd9416aac68acee3cb94",
+    urls = ["https://github.com/bazelbuild/bazel-skylib/releases/download/1.5.0/bazel-skylib-1.5.0.tar.gz"],
+)
+
+http_archive(
+    name = "build_bazel_rules_android",
+    urls = ["https://github.com/bazelbuild/rules_android/archive/v0.1.1.tar.gz"],
+    strip_prefix = "rules_android-0.1.1",
+    sha256 = "6461c1c5744442b394f46645957d6bd3420eb1b421908fe63caa03091b1b3655",
+)
+
+http_archive(
+    name = "org_tensorflow",
+    sha256 = "e58c939079588623e6fa1d054aec2f90f95018266e0a970fd353a5244f5173dc",
+    strip_prefix = "tensorflow-2.13.0",
+    urls = ["https://github.com/tensorflow/tensorflow/archive/v2.13.0.tar.gz"],
+)
+
+http_archive(
+    name = "mediapipe",
+    urls = ["https://github.com/google/mediapipe/archive/refs/tags/v0.10.14.tar.gz"],
+    strip_prefix = "mediapipe-0.10.14",
+    sha256 = "9d46fa5363f5c4e11c3d1faec71b0746f15c5aab7b5460d0e5655d7af93c6957",
+)
+
+# 3. INITIALIZATION (Updated for MediaPipe v0.10.14)
+# The old setup_repositories.bzl is gone. 
+# Use the consolidated workspace setup instead.
+
+load("@mediapipe//mediapipe/framework/tool:mediapipe_graph.bzl", "mediapipe_binary_graph")
+
+# Load the dependencies from the new location
+load("@mediapipe//:workspace_deps.bzl", "mediapipe_deps")
+mediapipe_deps()
+
+# If you need OpenCV
+load("@mediapipe//:opencv_install.bzl", "opencv_repository")
+opencv_repository()
