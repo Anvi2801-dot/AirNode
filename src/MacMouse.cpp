@@ -4,32 +4,22 @@
 class MacMouse : public IMouseController {
 public:
     void move(int x, int y) override {
-        CGPoint point = CGPointMake(static_cast<CGFloat>(x), static_cast<CGFloat>(y));
-        CGEventRef moveEvent = CGEventCreateMouseEvent(
-            NULL, kCGEventMouseMoved, point, kCGMouseButtonLeft
-        );
-        CGEventPost(kCGHIDEventTap, moveEvent);
-        CFRelease(moveEvent);
+        CGPoint point = CGPointMake(x, y);
+        CGEventRef e = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, point, kCGMouseButtonLeft);
+        CGEventPost(kCGHIDEventTap, e); CFRelease(e);
     }
-
     void click() override {
-        // Clicks require a Down event followed by an Up event
-        CGEventRef ourEvent = CGEventCreate(NULL);
-        CGPoint currentPos = CGEventGetLocation(ourEvent);
-        CFRelease(ourEvent);
-
-        CGEventRef clickDown = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, currentPos, kCGMouseButtonLeft);
-        CGEventRef clickUp = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, currentPos, kCGMouseButtonLeft);
-        
-        CGEventPost(kCGHIDEventTap, clickDown);
-        CGEventPost(kCGHIDEventTap, clickUp);
-        
-        CFRelease(clickDown);
-        CFRelease(clickUp);
+        CGEventRef ref = CGEventCreate(NULL);
+        CGPoint pos = CGEventGetLocation(ref); CFRelease(ref);
+        CGEventRef dn = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, pos, kCGMouseButtonLeft);
+        CGEventRef up = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp,   pos, kCGMouseButtonLeft);
+        CGEventPost(kCGHIDEventTap, dn); CGEventPost(kCGHIDEventTap, up);
+        CFRelease(dn); CFRelease(up);
+    }
+    void scroll(float delta) override {
+        CGEventRef e = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 1, (int32_t)delta);
+        CGEventPost(kCGHIDEventTap, e); CFRelease(e);
     }
 };
 
-// Add this at the bottom of src/MacMouse.cpp
-IMouseController* createMacMouse() {
-    return new MacMouse();
-}
+IMouseController* createMacMouse() { return new MacMouse(); }
