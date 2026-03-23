@@ -22,9 +22,9 @@ target_link_libraries(gcvm_app
     ${OpenCV_LIBS}
     ${MEDIAPIPE_DYLIB}
     "-framework ApplicationServices"
+    "-framework Carbon"
 )
 
-# Tell the binary where to find the dylib at runtime
 set_target_properties(gcvm_app PROPERTIES
     BUILD_RPATH "${MEDIAPIPE_DIR}"
     INSTALL_RPATH "${MEDIAPIPE_DIR}"
