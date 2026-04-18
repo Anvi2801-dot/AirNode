@@ -119,6 +119,9 @@ HandGesture HandTracker::getGesture(const cv::Mat& frame) {
 
     // ── Pointer ──────────────────────────────────────────────────────────────
     g.detected = true;
+    g.confidence = (result.handedness_count > 0 && result.handedness[0].categories_count > 0)
+               ? result.handedness[0].categories[0].score
+               : 0.9f;
     g.x = static_cast<int>(hand0.landmarks[INDEX_TIP].x * frame.cols);
     g.y = static_cast<int>(hand0.landmarks[INDEX_TIP].y * frame.rows);
 

@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.16)
 project(GCVM)
 set(CMAKE_CXX_STANDARD 17)
 
+cmake_policy(SET CMP0167 NEW)
+
 find_package(OpenCV REQUIRED)
+find_package(Boost 1.90 REQUIRED)
 
 set(MEDIAPIPE_DIR "$ENV{HOME}/.pyenv/versions/3.10.12/lib/python3.10/site-packages/mediapipe/tasks/c")
 set(MEDIAPIPE_DYLIB "${MEDIAPIPE_DIR}/libmediapipe.dylib")
@@ -16,11 +19,14 @@ add_executable(gcvm_app
     src/main.cpp
     src/HandTracker.cpp
     src/MacMouse.cpp
+    src/WebSocketServer.cpp
 )
 
 target_link_libraries(gcvm_app
     ${OpenCV_LIBS}
     ${MEDIAPIPE_DYLIB}
+    Boost::headers
+    pthread
     "-framework ApplicationServices"
     "-framework Carbon"
 )

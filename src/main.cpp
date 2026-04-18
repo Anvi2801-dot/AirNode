@@ -3,20 +3,26 @@
 #include <chrono>
 #include "../include/MouseFactory.h"
 #include "../include/HandTracker.h"
+#include "../include/WebSocketServer.h"   // ADD
 
 static const int   SCREEN_W            = 1512;
 static const int   SCREEN_H            = 982;
 static const float SMOOTH              = 0.5f;
 static const float DEAD_ZONE           = 15.0f;
 static const int   CLICK_FRAMES        = 8;
-static const int   DOUBLE_CLICK_FRAMES = 50;  // ~1.5s hold arms double click
-static const int   DRAG_FRAMES         = 80;  // ~2.5s hold starts drag
+static const int   DOUBLE_CLICK_FRAMES = 50;
+static const int   DRAG_FRAMES         = 80;
 static const int   FIST_FRAMES         = 20;
 static const int   PINCH_RELEASE_GRACE = 8;
-static const int   DETECTION_GRACE     = 45; // frames before "no hand" is accepted;
+static const int   DETECTION_GRACE     = 45;
 
 using Clock = std::chrono::steady_clock;
 using Ms    = std::chrono::milliseconds;
+
+// ADD — converts status string to a JSON event broadcast
+static void broadcastEvent(WebSocketServer& ws, const std::string& tag, const std::string& body) {
+    ws.broadcast(R"({"type":"event","tag":")" + tag + R"(","body":")" + body + R"("})");
+}
 
 void drawLegend(cv::Mat& frame) {
     int ly = frame.rows - 280;
@@ -36,6 +42,9 @@ int main() {
     IMouseController* mouse = MouseFactory::createMouse();
     HandTracker tracker("hand_landmarker.task");
 
+    WebSocketServer ws(9001);   // ADD
+    ws.start();                 // ADD — launches background thread
+
     cv::VideoCapture cap(0);
     if (!cap.isOpened()) { std::cerr << "Camera failed!" << std::endl; return -1; }
     cap.set(cv::CAP_PROP_FRAME_WIDTH,  1920);
@@ -50,10 +59,10 @@ int main() {
     int  fistHeld          = 0;
     bool dragging          = false;
     bool clickPending      = false;
-    bool dblClickArmed     = false; // armed at 1.5s, fires on release
+    bool dblClickArmed     = false;
     bool paused            = false;
-
-    int detectionGrace = 0;
+    int  detectionGrace    = 0;
+    int  frameCount        = 0;   // ADD — for throttling metrics broadcasts
 
     cv::Mat frame;
 
@@ -62,7 +71,11 @@ int main() {
         if (frame.empty()) continue;
         cv::flip(frame, frame, 1);
 
+        auto t0 = Clock::now();   // ADD — latency timing start
         HandGesture g = tracker.getGesture(frame);
+        auto t1 = Clock::now();   // ADD
+        int latencyMs = (int)std::chrono::duration_cast<Ms>(t1 - t0).count();   // ADD
+
         tracker.drawSkeleton(frame, g);
 
         // ── Stable pinch with grace period ───────────────────────────────────
@@ -83,10 +96,22 @@ int main() {
             if (fistHeld == FIST_FRAMES) {
                 paused = !paused;
                 fistHeld = 0;
-                std::cout << (paused ? "PAUSED" : "RESUMED") << std::endl;
+                std::string state = paused ? "PAUSED" : "RESUMED";
+                std::cout << state << std::endl;
+                broadcastEvent(ws, "GESTURE", "fist → " + state);   // ADD
             }
         } else {
             fistHeld = 0;
+        }
+
+        // ADD — broadcast metrics every 10 frames (don't flood the socket)
+        frameCount++;
+        if (frameCount % 10 == 0) {
+            ws.broadcast(
+                R"({"type":"metrics","latency_ms":)" + std::to_string(latencyMs) +
+                R"(,"confidence":)" + std::to_string(g.detected ? (int)(g.confidence * 100) : 0) +
+                R"(,"fps":60})"
+            );
         }
 
         drawLegend(frame);
@@ -102,7 +127,7 @@ int main() {
 
         if (g.detected && !g.fist) {
             detectionGrace = 0;
-            // ── Smooth + velocity-based dead zone ─────────────────────────────
+
             float sx = (float(g.x) / frame.cols) * SCREEN_W;
             float sy = (float(g.y) / frame.rows) * SCREEN_H;
             float newX = SMOOTH*smoothX + (1.f-SMOOTH)*sx;
@@ -110,39 +135,42 @@ int main() {
             float dx = newX-prevSmoothX, dy = newY-prevSmoothY;
             float speed = std::sqrt(dx*dx + dy*dy);
             if (speed > DEAD_ZONE) {
-                // Scale movement — slow at edges of dead zone, full speed beyond
                 float scale = (speed - DEAD_ZONE) / speed;
                 smoothX = prevSmoothX + dx * scale;
                 smoothY = prevSmoothY + dy * scale;
                 prevSmoothX = smoothX;
                 prevSmoothY = smoothY;
                 mouse->move(int(smoothX), int(smoothY));
+
+                // ADD — broadcast move events (throttled to every 3 frames)
+                if (frameCount % 3 == 0) {
+                    broadcastEvent(ws, "MOVE",
+                        "dx=" + std::to_string(int(dx)) +
+                        " dy=" + std::to_string(int(dy)));
+                }
             }
 
-            // ── Pinch state machine ───────────────────────────────────────────
             if (pinchActive) {
                 pinchHeld++;
 
-                // Arm single click
                 if (pinchHeld == CLICK_FRAMES)
                     clickPending = true;
 
-                // Arm double click (fires on release, NOT here)
                 if (pinchHeld == DOUBLE_CLICK_FRAMES && !dragging) {
                     clickPending   = false;
                     dblClickArmed  = true;
                 }
 
-                // Drag — cancels double click, starts drag immediately
                 if (pinchHeld == DRAG_FRAMES && !dragging) {
                     dblClickArmed = false;
                     clickPending  = false;
                     dragging      = true;
                     mouse->dragStart(int(smoothX), int(smoothY));
                     std::cout << "Drag start" << std::endl;
+                    broadcastEvent(ws, "DRAG", "start");   // ADD
                 }
 
-                // Progress bar
+                // progress bar (unchanged)
                 if (pinchHeld > CLICK_FRAMES && pinchHeld < DOUBLE_CLICK_FRAMES) {
                     float p = float(pinchHeld - CLICK_FRAMES) / (DOUBLE_CLICK_FRAMES - CLICK_FRAMES);
                     cv::rectangle(frame, cv::Point(g.x-50, g.y-35), cv::Point(g.x-50+int(p*100), g.y-25), cv::Scalar(0,200,255), -1);
@@ -156,28 +184,71 @@ int main() {
                 }
 
             } else {
-                // ── Pinch released ────────────────────────────────────────────
                 if (dragging) {
                     mouse->dragEnd(int(smoothX), int(smoothY));
                     dragging = false;
                     std::cout << "Drag end" << std::endl;
+                    broadcastEvent(ws, "DRAG", "end");   // ADD
                 } else if (dblClickArmed) {
-                    // Fire double click on release
                     mouse->doubleClick();
                     std::cout << "Double click!" << std::endl;
+                    broadcastEvent(ws, "CLICK", "double");   // ADD
                 } else if (clickPending) {
                     mouse->click();
                     std::cout << "Click" << std::endl;
+                    broadcastEvent(ws, "CLICK", "left btn");   // ADD
                 }
                 clickPending  = false;
                 dblClickArmed = false;
                 pinchHeld     = 0;
             }
 
-            if (g.rightClick)            mouse->rightClick();
-            if (g.scrollDelta != 0.f)    mouse->scroll(g.scrollDelta);
-            if (g.threeFingerSwipe)      mouse->swipe(g.swipeDeltaX > 0);
-            if (g.pinchZoomDelta != 0.f) mouse->zoom(g.pinchZoomDelta);
+            if (g.rightClick) {
+                mouse->rightClick();
+                broadcastEvent(ws, "CLICK", "right btn");   // ADD
+            }
+            if (g.scrollDelta != 0.f) {
+                mouse->scroll(g.scrollDelta);
+                broadcastEvent(ws, "SCROLL", "dy=" + std::to_string(int(g.scrollDelta)));   // ADD
+            }
+            if (g.threeFingerSwipe) {
+                mouse->swipe(g.swipeDeltaX > 0);
+                broadcastEvent(ws, "GESTURE", "three-finger swipe");   // ADD
+            }
+            if (g.pinchZoomDelta != 0.f) {
+                mouse->zoom(g.pinchZoomDelta);
+                broadcastEvent(ws, "GESTURE", "pinch zoom");   // ADD
+            }
+
+            // ADD — broadcast current gesture state to update dashboard label
+            std::string gestureName = dragging       ? "drag"
+                                    : dblClickArmed  ? "click"
+                                    : pinchActive    ? "click"
+                                    : g.threeFingerSwipe ? "scroll"
+                                    :                  "pointer";
+            ws.broadcast(R"({"type":"gesture","gesture":")" + gestureName + R"("})");
+
+            ws.broadcast(
+                R"({"type":"confidence",)"
+                R"("pointer":)" + std::to_string(!pinchActive && !dragging && g.detected ? 0.94f : 0.0f) +
+                R"(,"click":)"   + std::to_string(pinchActive && !dragging ? 0.90f : 0.0f) +
+                R"(,"scroll":)"  + std::to_string(g.scrollDelta != 0.f ? 0.88f : 0.0f) +
+                R"(,"drag":)"    + std::to_string(dragging ? 0.92f : 0.0f) +
+                R"(,"zoom":)"    + std::to_string(g.pinchZoomDelta != 0.f ? 0.85f : 0.0f) +
+                R"(})"
+            );
+
+            if (frameCount % 2 == 0) {
+                const LandmarkCache& lc = tracker.getLandmarks();
+                std::string lm = R"({"type":"landmarks","points":[)";
+                for (int i = 0; i < 21; i++) {
+                    lm += R"({"x":)" + std::to_string(lc.x[i] / frame.cols) +
+                        R"(,"y":)" + std::to_string(lc.y[i] / frame.rows) + "}";
+                    if (i < 20) lm += ",";
+                }
+                lm += "]}";
+                ws.broadcast(lm);
+            }
 
             cv::Scalar dotColor = dragging       ? cv::Scalar(255,165,0)
                                 : dblClickArmed  ? cv::Scalar(0,200,255)
@@ -200,6 +271,7 @@ int main() {
                 if (dragging) {
                     mouse->dragEnd(int(smoothX), int(smoothY));
                     dragging = false; pinchHeld = 0;
+                    broadcastEvent(ws, "DRAG", "end (no hand)");   // ADD
                 }
                 clickPending  = false;
                 dblClickArmed = false;
@@ -207,8 +279,8 @@ int main() {
                 pinchHeld     = 0;
                 cv::putText(frame, "No hand", cv::Point(20, 50),
                             cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0,165,255), 2);
+                broadcastEvent(ws, "INFO", "no hand detected");   // ADD
             } else {
-                // Keep cursor alive at last position during brief loss
                 mouse->move(int(smoothX), int(smoothY));
                 cv::putText(frame, "Reconnecting...", cv::Point(20, 50),
                             cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0,165,255), 2);
@@ -219,6 +291,7 @@ int main() {
         if (cv::waitKey(1) == 'q') break;
     }
 
+    ws.stop();   // ADD — clean shutdown
     cap.release();
     cv::destroyAllWindows();
     delete mouse;
